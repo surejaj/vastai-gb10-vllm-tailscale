@@ -1,0 +1,73 @@
+name: build-image
+
+on:
+  push:
+    # `paths` limits branch pushes; GitHub does not apply it to tag pushes, so
+    # v* tags always build.
+    branches: [main]
+    paths:
+      - image/**
+      - .github/workflows/build-image.yml
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    # Native arm64 runner (free for public repos): no QEMU.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Free disk space
+        # The vLLM base image is ~15-20 GB; the runner has ~14 GB free by default.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          docker system prune -af
+          df -h
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: image
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The gha cache is capped at 10 GB per repo and the base image alone
+          # is bigger, so a full cache would evict itself. mode=min caches only
+          # the final image's layers, which is what we rebuild (the base is
+          # re-pulled from Docker Hub by digest).
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Print digest
+        run: |
+          echo "Pushed ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+          echo "Use: provision-gb10.py create --image ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} ..."
+          echo "### Image digest" >> "$GITHUB_STEP_SUMMARY"
+          echo '`${{ env.IMAGE }}@${{ steps.build.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
