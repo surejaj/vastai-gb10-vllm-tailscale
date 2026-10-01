@@ -4,7 +4,7 @@
 The instance runs the vastai-gb10-vllm-tailscale image (vLLM per model + LiteLLM on
 127.0.0.1:8080, exposed only through `tailscale serve`) and joins the tailnet
 as `gb10-vast` (tag:vastai-gb10) with Tailscale in userspace-networking mode.
-The image source is in vast-ai/image/. See README.md.
+The image source is in image/. See README.md.
 
 Subcommands:
   search    list rentable GB10 offers, cheapest first (read-only; the default)
@@ -17,20 +17,34 @@ lives in RAM, so a restarted instance would try to re-use its already
 consumed single-use key. Every `create` needs a FRESH single-use, ephemeral,
 pre-tagged tag:vastai-gb10 auth key.
 
-Secrets come from the environment only:
-  VAST_API_KEY   vast.ai API key (every subcommand except dry-run create)
+Secrets (never taken from the command line, never printed):
+  VAST_API_KEY   vast.ai API key. Read from Infisical (the Infisical CLI,
+                 logged in as you: `infisical login --domain ...`), secret
+                 VAST_API_KEY at $VAST_INFISICAL_PATH. The env var VAST_API_KEY
+                 is only a fallback (with a warning). Fetched lazily, so
+                 --help, --print-onstart and a dry-run `create` need nothing.
+  HF_TOKEN       optional Hugging Face token handed to the instance; same
+                 lookup (Infisical first, then env), silently skipped if absent
   TS_AUTHKEY     GB10 Tailscale auth key handed to the instance (create --yes).
+                 ENV ONLY: a fresh single-use key per create, never stored.
                  Not the proxy's key (that one lives in Infisical).
-  HF_TOKEN       optional Hugging Face token handed to the instance
+
+Infisical settings (env, with defaults): INFISICAL_DOMAIN
+(https://infisical.rattlesnake-pauling.ts.net), INFISICAL_ENV (prod),
+VAST_INFISICAL_PATH (/vast-ai), INFISICAL_PROJECT_ID (optional; otherwise the
+CLI uses .infisical.json from `infisical init`, looked up in this script's
+directory), INFISICAL_TIMEOUT (seconds, 20).
 """
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 import textwrap
 import time
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LABEL = "gb10-vast"
 DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # Space-separated alias=hf_repo@mem_frac@max_len[@extra]; extra = vLLM args
@@ -67,6 +81,9 @@ def die(msg):
     raise CliError(msg)
 
 
+_SEEN_SECRETS = []   # resolved secret values, scrubbed from error text
+
+
 def env_secret(name, required=True):
     val = os.environ.get(name, "").strip()
     if required and not val:
@@ -75,14 +92,77 @@ def env_secret(name, required=True):
     return val
 
 
+def infisical_get(name):
+    """Fetch one secret with the Infisical CLI. Returns (value, reason).
+
+    value is None on any failure and reason is a generic string (exit code,
+    timeout, ...). The CLI's stderr is never shown: it could echo secrets.
+    cwd is this script's directory so `.infisical.json` (infisical init) is found.
+    """
+    domain = os.environ.get("INFISICAL_DOMAIN", "https://infisical.rattlesnake-pauling.ts.net")
+    cmd = ["infisical", "secrets", "get", name, "--plain", "--silent",
+           "--path", os.environ.get("VAST_INFISICAL_PATH", "/vast-ai"),
+           "--env", os.environ.get("INFISICAL_ENV", "prod"),
+           "--domain", domain]
+    project = os.environ.get("INFISICAL_PROJECT_ID", "").strip()
+    if project:
+        cmd += ["--projectId", project]
+    try:
+        timeout = float(os.environ.get("INFISICAL_TIMEOUT", "20"))
+        r = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=True, text=True,
+                           timeout=timeout)
+    except FileNotFoundError:
+        return None, "the infisical CLI is not installed"
+    except subprocess.TimeoutExpired:
+        return None, "the infisical CLI timed out"
+    except (OSError, ValueError) as e:
+        return None, f"could not run the infisical CLI ({type(e).__name__})"
+    if r.returncode != 0:
+        return None, f"the infisical CLI failed (exit code {r.returncode})"
+    val = r.stdout.strip()
+    if not val:
+        return None, "the infisical CLI returned an empty value"
+    return val, ""
+
+
+def resolve_vast_key():
+    """VAST_API_KEY: Infisical first; env only as a warned fallback."""
+    val, reason = infisical_get("VAST_API_KEY")
+    if val:
+        _SEEN_SECRETS.append(val)
+        return val
+    env_val = os.environ.get("VAST_API_KEY", "").strip()
+    if env_val:
+        _SEEN_SECRETS.append(env_val)
+        print(f"WARNING: using VAST_API_KEY from the environment because "
+              f"Infisical failed ({reason}). Infisical is the source of truth.",
+              file=sys.stderr)
+        return env_val
+    domain = os.environ.get("INFISICAL_DOMAIN", "https://infisical.rattlesnake-pauling.ts.net")
+    die(f"no vast.ai API key: {reason}, and VAST_API_KEY is not set in the "
+        f"environment. Fix with: `infisical login --domain {domain}` (then "
+        f"`infisical init` in {SCRIPT_DIR} or export INFISICAL_PROJECT_ID; "
+        f"secret VAST_API_KEY at {os.environ.get('VAST_INFISICAL_PATH', '/vast-ai')}, "
+        f"env {os.environ.get('INFISICAL_ENV', 'prod')}), or export VAST_API_KEY as a fallback.")
+
+
+def resolve_hf_token():
+    """Optional HF_TOKEN: Infisical, then env; absent means '' with no warning."""
+    val, _ = infisical_get("HF_TOKEN")
+    val = val or os.environ.get("HF_TOKEN", "").strip()
+    if val:
+        _SEEN_SECRETS.append(val)
+    return val or ""
+
+
 def default_client_factory():
     """Build the real SDK client. Imported lazily: --help needs no SDK."""
-    key = env_secret("VAST_API_KEY")
+    key = resolve_vast_key()
     try:
         from vastai_sdk import VastAI
     except ImportError:
         die("vastai_sdk is not installed. Run: pip install -r "
-            "vast-ai/requirements.txt (or: pip install vastai-sdk)")
+            "requirements.txt (or: pip install vastai-sdk)")
     return VastAI(api_key=key, quiet=True)
 
 
@@ -197,7 +277,9 @@ def cmd_create(args, client_factory):
     sent = ONSTART_SCRIPT
     dry = not args.yes
     ts_key = env_secret("TS_AUTHKEY", required=not dry)
-    hf_token = env_secret("HF_TOKEN", required=False)
+    # Dry run is offline: it never calls Infisical, so HF_TOKEN is only shown
+    # (redacted) if it happens to be in the environment.
+    hf_token = env_secret("HF_TOKEN", required=False) if dry else resolve_hf_token()
     env = build_env(args, ts_key or "<TS_AUTHKEY not set>", hf_token)
     request = {
         "id": args.offer_id, "image": args.image, "disk": args.disk,
@@ -219,7 +301,7 @@ def cmd_create(args, client_factory):
         return 0
 
     client = client_factory()
-    secrets = [ts_key, hf_token, os.environ.get("VAST_API_KEY", "")]
+    secrets = [ts_key, hf_token, os.environ.get("VAST_API_KEY", "")] + _SEEN_SECRETS
 
     existing = gb10_instances(client)
     if existing and not args.allow_duplicate:
@@ -356,7 +438,8 @@ def build_parser():
                        description="Print the create request and onstart script (dry run, "
                                    "offline). With --yes: re-fetch the offer, refuse if a "
                                    "gb10-vast instance exists, rent, and wait for running. "
-                                   "Env: VAST_API_KEY and TS_AUTHKEY (needed with --yes): a FRESH "
+                                   "VAST_API_KEY / HF_TOKEN come from Infisical (env is a "
+                                   "fallback). TS_AUTHKEY (env only, needed with --yes): a FRESH "
                                    "single-use, ephemeral, tag:vastai-gb10 key per create.")
     c.add_argument("--offer-id", type=int, required=True, help="offer id from `search`")
     c.add_argument("--yes", action="store_true", help="actually rent (billable)")
@@ -415,7 +498,7 @@ def main(argv=None, client_factory=None):
         print("interrupted", file=sys.stderr)
         return 130
     except Exception as e:  # SDK/HTTP errors: no traceback, no secrets
-        secrets = [os.environ.get("VAST_API_KEY", ""), os.environ.get("TS_AUTHKEY", "")]
+        secrets = [os.environ.get("VAST_API_KEY", ""), os.environ.get("TS_AUTHKEY", "")] + _SEEN_SECRETS
         print(f"ERROR: {type(e).__name__}: {scrub(str(e), secrets)}", file=sys.stderr)
         return 1
 

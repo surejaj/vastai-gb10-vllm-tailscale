@@ -63,7 +63,7 @@ State: `/mnt/main/app-data/vastai-ts-proxy/tailscale` (bind, rw).
   visible here). This script uses the shared `infisical-runtime` volume and
   refreshes it with `install_infisical_runtime`. If you prefer to mount
   `gbrain-infisical-runtime`, set `INFISICAL_RUNTIME_VOLUME` before running.
-- **Bootstrap file:** `vast-ai/infisical.env.gpg` (one runtime identity per
+- **Bootstrap file:** `infisical.env.gpg` (one runtime identity per
   service, keys per `infisical/scripts/README.md`) must exist. It is not
   created here. To reuse gbrain's identity instead, point `BOOTSTRAP_FILE` at it.
 - **Auth key path:** secret `TS_AUTHKEY` at Infisical path `/vastai-tailscale`
@@ -274,9 +274,34 @@ docker run --rm --network vastai-access busybox:stable wget -T3 -qO- http://1.1.
 
 Python 3.10+, `pip install -r requirements.txt` (`vastai-sdk`; only needed for
 real API calls, not for `--help`, `--print-onstart` or a `create` dry run).
-Secrets come from the **environment only** (never CLI args, never printed or
-written): `VAST_API_KEY`, for `create --yes` `TS_AUTHKEY`, and optionally
-`HF_TOKEN` (passed to the instance, redacted in output).
+Secrets are never taken from CLI args and never printed or written.
+
+**vast.ai API key (Infisical is the source of truth).** `provision-gb10.py`
+resolves it itself, so the deploy script, the undeploy script and direct use
+share one path, and only when a vast.ai client is actually needed (`--help`,
+`--print-onstart` and a dry-run `create` need nothing).
+
+1. In Infisical, store secret `VAST_API_KEY` (and optionally `HF_TOKEN`) at path
+   `/vast-ai` (env `prod`). The proxy's runtime identity must **not** have read
+   access to `/vast-ai`; it only needs `/vastai-tailscale`. The proxy bootstrap
+   file `infisical.env.gpg` is unrelated and cannot read this key.
+2. Once per session on your Mac: `infisical login --domain
+   https://infisical.rattlesnake-pauling.ts.net`.
+3. Tell the CLI which project: run `infisical init` once in this repo directory
+   (writes `.infisical.json`, git-ignored; the script runs the CLI with that
+   directory as cwd), or `export INFISICAL_PROJECT_ID=<id>`.
+4. The script then runs `infisical secrets get VAST_API_KEY --plain --silent
+   --path /vast-ai --env prod --domain <domain> [--projectId <id>]`. Overrides
+   (env): `INFISICAL_DOMAIN`, `INFISICAL_ENV`, `VAST_INFISICAL_PATH`,
+   `INFISICAL_PROJECT_ID`, `INFISICAL_TIMEOUT`. On failure only a generic error
+   and the CLI exit code are shown (never its stderr).
+5. **Fallback only:** if Infisical fails or the CLI is missing, an exported
+   `VAST_API_KEY` is used, with a WARNING on stderr ("Infisical is the source of
+   truth"). If both fail, the error names both ways to fix it.
+6. `HF_TOKEN` is looked up the same way (Infisical, then env) but is optional:
+   if absent in both, the instance simply gets none, with no warning.
+7. `TS_AUTHKEY` stays **env only**: a fresh single-use key per `create`, never
+   stored in Infisical.
 
 ```bash
 ./provision-gb10.py search                          # GB10 offers, cheapest first
@@ -319,7 +344,9 @@ repos.
 
 **From the deploy script.** `deploy-vastai-proxy.sh` runs `provision-gb10.py` as
 its last step (after the proxy is up), using `${PYTHON:-python3}` with `vastai-sdk`
-importable and `VAST_API_KEY` set (both checked first; values never printed):
+importable (checked first; the vast.ai key is resolved by the Python script as
+above, so the deploy script no longer checks `VAST_API_KEY`; if `status` cannot
+reach vast.ai it stops with "could not reach vast.ai (see error above)"):
 
 ```bash
 ./deploy-vastai-proxy.sh                              # proxy + `search`; rents nothing
@@ -332,7 +359,7 @@ If a `gb10-vast` instance already exists, the step logs it and creates nothing
 (safe re-deploy). Nothing is rented without an explicit `--offer-id`.
 `undeploy-vastai-proxy.sh --destroy-gb10` destroys it after a typed confirmation;
 without the flag it prints a reminder if one is still billing (silently skipped
-when `vastai-sdk` or `VAST_API_KEY` is missing).
+when `vastai-sdk` is missing or `status` fails; `--destroy-gb10` dies on failure).
 
 **Not verified (no rental was made, nothing was built or run on a GB10):**
 - The vast.ai `gpu_name` for this hardware. Default `GB10` + `cpu_arch=arm64`

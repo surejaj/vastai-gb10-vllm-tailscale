@@ -7,7 +7,8 @@
 #   --destroy-gb10  also destroy the vast.ai gb10-vast instance (deletes its
 #                   disk and models) via provision-gb10.py, after a prompt.
 #                   Without it, a reminder is printed if one is still billing.
-#                   Needs VAST_API_KEY and vastai-sdk (PYTHON, default python3).
+#                   Needs vastai-sdk (PYTHON, default python3); provision-gb10.py
+#                   fetches the vast.ai key from Infisical (infisical login first).
 
 set -euo pipefail
 
@@ -98,10 +99,9 @@ purge_data() {
 }
 
 # gb10_ids: print gb10-vast instance ids (one per line). Returns non-zero if
-# they cannot be listed (no vastai_sdk / VAST_API_KEY / API error).
+# they cannot be listed (no vastai_sdk, key lookup or API error).
 gb10_ids() {
   local py="${PYTHON:-python3}"
-  [[ -n "${VAST_API_KEY:-}" ]] || return 1
   "${py}" -c 'import vastai_sdk' >/dev/null 2>&1 || return 1
   "${py}" "${SCRIPT_DIR}/provision-gb10.py" status --ids 2>/dev/null
 }
@@ -113,11 +113,10 @@ destroy_gb10() {
     log "would ask for confirmation, then run: provision-gb10.py destroy --instance-id <id> --yes"
     return 0
   fi
-  [[ -n "${VAST_API_KEY:-}" ]] || die "VAST_API_KEY is not set; cannot destroy the GB10."
   "${py}" -c 'import vastai_sdk' >/dev/null 2>&1 \
     || die "vastai_sdk is not importable with ${py}. Run: ${py} -m pip install -r ${SCRIPT_DIR}/requirements.txt"
   local ids id confirm
-  ids="$("${py}" "${prov}" status --ids)" || die "provision-gb10.py status failed"
+  ids="$("${py}" "${prov}" status --ids)" || die "could not reach vast.ai (see error above); cannot destroy the GB10."
   if [[ -z "${ids}" ]]; then
     log "No gb10-vast instance to destroy."
     return 0

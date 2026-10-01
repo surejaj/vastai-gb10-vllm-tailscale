@@ -13,11 +13,13 @@
 #   --max-price X     refuse offers above X $/hr (passed to provision-gb10.py)
 #   --skip-provision  do not run the GB10 provisioning step at all
 #
-# Provisioning env (never printed): VAST_API_KEY (vast.ai) and, when renting,
-# TS_AUTHKEY: a FRESH single-use, ephemeral, pre-tagged tag:vastai-gb10 key
+# Provisioning secrets (never printed): provision-gb10.py itself fetches the
+# vast.ai key (VAST_API_KEY) from Infisical via the `infisical` CLI (run
+# `infisical login --domain ...` first; env VAST_API_KEY is only a fallback),
+# so nothing is checked here. When renting, env TS_AUTHKEY is required: a FRESH single-use, ephemeral, pre-tagged tag:vastai-gb10 key
 # for the GB10. It is NOT the proxy's key (that is Infisical /vastai-tailscale,
 # tag:vastai-client). Python: ${PYTHON:-python3} with vastai-sdk installed
-# (pip install -r vast-ai/requirements.txt).
+# (pip install -r requirements.txt).
 
 set -euo pipefail
 
@@ -217,11 +219,10 @@ provision_gb10() {
 
   "${py}" -c 'import vastai_sdk' >/dev/null 2>&1 \
     || die "vastai_sdk is not importable with ${py}. Run: ${py} -m pip install -r ${SCRIPT_DIR}/requirements.txt (or set PYTHON=/path/to/venv/bin/python), or pass --skip-provision."
-  [[ -n "${VAST_API_KEY:-}" ]] || die "VAST_API_KEY is not set (needed to provision the GB10). Export it, or pass --skip-provision."
 
   log "Checking for an existing gb10-vast instance"
   local ids
-  ids="$("${py}" "${prov}" status --ids)" || die "provision-gb10.py status failed"
+  ids="$("${py}" "${prov}" status --ids)" || die "could not reach vast.ai (see error above)"
   if [[ -n "${ids}" ]]; then
     log "gb10-vast instance already exists (id: $(echo ${ids})); not creating another"
     "${py}" "${prov}" status
