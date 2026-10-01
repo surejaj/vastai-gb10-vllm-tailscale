@@ -49,16 +49,20 @@ LABEL = "gb10-vast"
 DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # Space-separated alias=hf_repo@mem_frac@max_len[@extra]; extra = vLLM args
 # joined with '+'. Started one at a time, largest share first (~0.78 total).
-# Repos are researched, not test-run: see README "Models".
+# Verified on a vast.ai GB10 on 2026-10-01. --kv-cache-memory-bytes is
+# required on the GB10: unified memory means page cache freed while vLLM
+# profiles makes its memory check fail; an explicit KV size skips the check.
 DEFAULT_MODELS = (
     "main=unsloth/Qwen3.8-27B-NVFP4@0.38@65536@"
     "--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice"
-    "+--tool-call-parser+qwen3_xml+--max-num-seqs+4 "
+    "+--tool-call-parser+qwen3_xml+--max-num-seqs+4+--kv-cache-memory-bytes+19327352832 "
     "worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@32768@"
     "--kv-cache-dtype+fp8+--enable-auto-tool-choice+--tool-call-parser+hermes"
-    "+--max-num-seqs+4 "
-    "vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2 "
+    "+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 "
+    "vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2"
+    "+--kv-cache-memory-bytes+3221225472 "
     "embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code"
+    "+--kv-cache-memory-bytes+1073741824"
 )
 DEFAULT_DISK = 100
 DEFAULT_TS_TAG = "tag:vastai-gb10"
@@ -309,8 +313,13 @@ def cmd_create(args, client_factory):
             + "; ".join(instance_line(i) for i in existing)
             + "). Use --allow-duplicate to rent another.")
 
-    found = client.search_offers(query=f"id={args.offer_id}", type="on-demand",
-                                 order="dph_total", limit=1, storage=args.disk)
+    # The SDK's search returns nothing for an `id=` filter (and for
+    # verified=any), so re-run the same query `search` uses and pick by id.
+    q = argparse.Namespace(
+        gpu_name=args.gpu_name, cpu_arch=getattr(args, "cpu_arch", "arm64"),
+        allow_unverified=False, min_reliability=0, disk=args.disk)
+    found = client.search_offers(query=build_query(q), type="on-demand",
+                                 order="dph_total", limit=500, storage=args.disk)
     offer = next((o for o in found or [] if o.get("id") == args.offer_id), None)
     if not offer:
         die(f"offer {args.offer_id} is no longer available (or not rentable). "

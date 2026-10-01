@@ -167,6 +167,13 @@ its place. LiteLLM is then started with only the healthy aliases, and
 `tailscale serve` (required) publishes it.
 
 Known risks:
+- **vLLM memory profiling on unified memory (hit on 2026-10-01).** Without an
+  explicit KV size, `main` died with `Error in memory profiling. Initial free
+  memory 50.92 GiB, current free memory 80.31 GiB`: page cache from the
+  weight downloads was freed while vLLM profiled, and the container can't drop
+  caches (`/proc/sys/vm` is read-only). Every default spec therefore sets
+  `--kv-cache-memory-bytes` (main 18 GiB, worker 8, vision 3, embed 1), which
+  skips the check. Keep it on any spec you add.
 - **vLLM on sm_121.** v0.30.0 lists GB10 work (SM12x FP8 swizzle, W4A4 NVFP4
   preferred on SM120/121, B12X attention) but I found no report of this exact
   set on a vast.ai GB10. NVFP4 MoE (`worker`) is the likeliest to hit a kernel

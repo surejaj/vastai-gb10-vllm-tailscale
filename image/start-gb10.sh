@@ -51,7 +51,7 @@ VLLM_BASE_PORT="${GB10_VLLM_BASE_PORT:-8001}"
 HEALTH_TIMEOUT="${GB10_HEALTH_TIMEOUT:-2400}"   # first boot downloads weights
 SUPERVISE_INTERVAL="${GB10_SUPERVISE_INTERVAL:-30}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"
-GB10_MODELS="${GB10_MODELS:-main=unsloth/Qwen3.8-27B-NVFP4@0.38@65536@--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+4 worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@32768@--kv-cache-dtype+fp8+--enable-auto-tool-choice+--tool-call-parser+hermes+--max-num-seqs+4 vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code}"
+GB10_MODELS="${GB10_MODELS:-main=unsloth/Qwen3.8-27B-NVFP4@0.38@65536@--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+4+--kv-cache-memory-bytes+19327352832 worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@32768@--kv-cache-dtype+fp8+--enable-auto-tool-choice+--tool-call-parser+hermes+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2+--kv-cache-memory-bytes+3221225472 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
 mkdir -p "$HF_HOME" "$(dirname "$TS_SOCK")"
 
 # ---------------------------------------------------------------- 1. tailscale

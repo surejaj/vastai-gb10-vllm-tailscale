@@ -121,8 +121,8 @@ mint_if_needed() {
     echo "<ONE_TIME_SECRET_PLACEHOLDER>"
     return 0
   fi
-  load_bootstrap >&2
-  install_infisical_runtime >&2
+  # load_bootstrap / install_infisical_runtime run in main(): this function
+  # runs in a $(...) subshell, so BOOT_* vars set here would be lost.
   if path_contains "${STATE_DIR}" tailscaled.state _current-profile; then
     log "Tailscale state already initialised; no auth key fetch needed." >&2
   else
@@ -243,6 +243,10 @@ main() {
   ensure_network
   ensure_state_dir
   local secret
+  if ! "${DRY_RUN}"; then
+    load_bootstrap
+    install_infisical_runtime
+  fi
   secret="$(mint_if_needed)"
   # In dry-run the placeholder line is only informational.
   "${DRY_RUN}" && secret=""
