@@ -49,17 +49,20 @@ LABEL = "gb10-vast"
 DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # Space-separated alias=hf_repo@mem_frac@max_len[@extra]; extra = vLLM args
 # joined with '+'. Started one at a time, largest share first (~0.78 total).
-# Verified on a vast.ai GB10 on 2026-10-01. --kv-cache-memory-bytes is
+# Verified on a vast.ai GB10 on 2026-10-04. --kv-cache-memory-bytes is
 # required on the GB10: unified memory means page cache freed while vLLM
 # profiles makes its memory check fail; an explicit KV size skips the check.
+# worker needs --reasoning-parser: Hermes sends thinking_token_budget, which
+# vLLM rejects without one. main takes 8 seqs so subagent fan-out doesn't queue.
 DEFAULT_MODELS = (
-    "main=unsloth/Qwen3.8-27B-NVFP4@0.38@65536@"
+    "main=unsloth/Qwen3.8-27B-NVFP4@0.38@131072@"
     "--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice"
-    "+--tool-call-parser+qwen3_xml+--max-num-seqs+4+--kv-cache-memory-bytes+19327352832 "
-    "worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@32768@"
-    "--kv-cache-dtype+fp8+--enable-auto-tool-choice+--tool-call-parser+hermes"
-    "+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 "
-    "vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2"
+    "+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+19327352832 "
+    "worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@65536@"
+    "--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice"
+    "+--tool-call-parser+hermes+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 "
+    "vision=PaddlePaddle/PaddleOCR-VL@0.12@16384@--trust-remote-code+--max-num-seqs+8"
+    "+--max-num-batched-tokens+16384+--no-enable-prefix-caching+--mm-processor-cache-gb+0"
     "+--kv-cache-memory-bytes+3221225472 "
     "embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code"
     "+--kv-cache-memory-bytes+1073741824"
