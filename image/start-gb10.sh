@@ -137,6 +137,14 @@ CFG="$RUN/litellm.yaml"
     echo "      model: openai/${STARTED_ALIAS[$i]}"
     echo "      api_base: http://127.0.0.1:${STARTED_PORT[$i]}/v1"
     echo "      api_key: none"
+    # worker is an Instruct (non-thinking) model but runs with --reasoning-parser
+    # (Hermes sends thinking_token_budget); without this the parser files the
+    # whole answer under reasoning_content and content comes back null.
+    if [ "${STARTED_ALIAS[$i]}" = worker ]; then
+      echo "      extra_body:"
+      echo "        chat_template_kwargs:"
+      echo "          enable_thinking: false"
+    fi
     [ "${STARTED_EMB[$i]}" = 1 ] && { echo "    model_info:"; echo "      mode: embedding"; }
   done
   echo "litellm_settings:"
