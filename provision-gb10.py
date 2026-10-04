@@ -54,19 +54,30 @@ DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # profiles makes its memory check fail; an explicit KV size skips the check.
 # worker needs --reasoning-parser: Hermes sends thinking_token_budget, which
 # vLLM rejects without one. main takes 8 seqs so subagent fan-out doesn't queue.
+# main is the Qwen3.6-35B-A3B MoE (~3B active) with MTP-3: ~97 tok/s single
+# stream vs ~19 for the dense Qwen3.8-27B it replaced (measured 2026-10-04).
+# GB10 has no native FP4 MoE path, hence --moe-backend marlin. The dotted
+# --speculative-config.* form avoids JSON quotes in the env spec. Both chat
+# models run their native 262144 context. vision is Gemma 4 26B-A4B (MoE,
+# ~4B active), chosen for document/OCR reading; it is kept off tool calling.
 DEFAULT_MODELS = (
-    "main=unsloth/Qwen3.8-27B-NVFP4@0.38@131072@"
-    "--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice"
-    "+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+19327352832 "
-    "worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@65536@"
-    "--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice"
-    "+--tool-call-parser+hermes+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 "
-    "vision=PaddlePaddle/PaddleOCR-VL@0.12@16384@--trust-remote-code+--max-num-seqs+8"
-    "+--max-num-batched-tokens+16384+--no-enable-prefix-caching+--mm-processor-cache-gb+0"
-    "+--kv-cache-memory-bytes+3221225472 "
+    "main=nvidia/Qwen3.6-35B-A3B-NVFP4@0.45@262144@"
+    "--quantization+modelopt+--trust-remote-code+--kv-cache-dtype+fp8+--moe-backend+marlin"
+    "+--max-num-batched-tokens+8192+--enable-prefix-caching"
+    "+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+3"
+    "+--speculative-config.moe_backend+triton"
+    "+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml"
+    "+--max-num-seqs+8+--kv-cache-memory-bytes+25769803776 "
+    "vision=nvidia/Gemma-4-26B-A4B-NVFP4@0.30@262144@"
+    "--quantization+modelopt+--kv-cache-dtype+fp8+--moe-backend+marlin+--enable-prefix-caching"
+    "+--reasoning-parser+gemma4+--enable-auto-tool-choice+--tool-call-parser+gemma4"
+    "+--max-num-seqs+4+--kv-cache-memory-bytes+10737418240 "
     "embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code"
     "+--kv-cache-memory-bytes+1073741824"
 )
+# worker is a LiteLLM alias of main (no second copy in memory); Qwen3.6
+# batches well, so subagents, the approval guardian and titles share it.
+DEFAULT_ALIASES = "worker=main"
 DEFAULT_DISK = 100
 DEFAULT_TS_TAG = "tag:vastai-gb10"
 SERVE_PORT = 8080
@@ -179,6 +190,7 @@ def build_env(args, ts_authkey, hf_token=""):
         "TS_HOSTNAME": args.ts_hostname,
         "TS_TAGS": args.ts_tag,
         "GB10_MODELS": args.models,
+        "GB10_ALIASES": args.aliases,
         "HF_HOME": "/workspace/hf",
     }
     if args.main_fallback:
@@ -459,6 +471,9 @@ def build_parser():
     c.add_argument("--models", default=DEFAULT_MODELS,
                    help="vLLM models, space separated 'alias=hf_repo@mem_frac@max_len[@extra]' "
                         "(extra = vLLM args joined with '+'). Default: %(default)s")
+    c.add_argument("--aliases", default=DEFAULT_ALIASES,
+                   help="LiteLLM-only aliases served by a started model, space separated "
+                        "'alias=target' (GB10_ALIASES). Default: %(default)s")
     c.add_argument("--main-fallback", default="",
                    help="same spec, used if `main` fails to start (GB10_MAIN_FALLBACK)")
     c.add_argument("--ts-hostname", default=LABEL, help="tailnet hostname (default %(default)s)")

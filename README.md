@@ -117,15 +117,16 @@ their deploy definitions, or re-run the deploy script.
 
 ## 7. Models
 
-Four vLLM servers, one per alias, all on the one GPU. `--gpu-memory-utilization`
-is each server's share of the unified memory (total 0.78, about 95 GB of 121 GB;
-the rest is the OS, page cache, Tailscale, LiteLLM and the CUDA contexts).
+Three vLLM servers on one GPU, plus a LiteLLM-only alias. `--gpu-memory-utilization`
+is each server's nominal share of the unified memory (total 0.78, about 95 GB of
+121 GB; the rest is the OS, page cache, Tailscale, LiteLLM and the CUDA contexts);
+the real budget is weights plus the explicit `--kv-cache-memory-bytes`.
 
 | alias | HF repo | mem share | max_len | notes |
 |---|---|---|---|---|
-| `main` | `unsloth/Qwen3.8-27B-NVFP4` | 0.38 (~46 GB) | 65536 | fp8 KV, `--reasoning-parser qwen3`, tool calling `qwen3_xml` |
-| `worker` | `NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4` | 0.25 (~30 GB) | 32768 | fp8 KV, tool calling `hermes` |
-| `vision` | `Qwen/Qwen3-VL-8B-Instruct-FP8` | 0.12 (~15 GB) | 16384 | |
+| `main` | `nvidia/Qwen3.6-35B-A3B-NVFP4` | 0.45 (~54 GB) | 262144 | MoE ~3B active, `--quantization modelopt --moe-backend marlin`, MTP-3 speculative decoding, fp8 KV (24 GiB, ~2.03M tokens, 7.7 full-context requests), `--reasoning-parser qwen3`, tool calling `qwen3_xml`; ~89-97 tok/s single stream (was ~19 with dense `unsloth/Qwen3.8-27B-NVFP4`, switched 2026-10-04) |
+| `worker` | LiteLLM alias of `main` (`GB10_ALIASES=worker=main`) | none | 262144 | same vLLM as `main`, with `chat_template_kwargs.enable_thinking: false` so short answers (approval guardian, titles, compression) land in `content`. Was `NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4` until 2026-10-05 |
+| `vision` | `nvidia/Gemma-4-26B-A4B-NVFP4` | 0.30 (~36 GB) | 262144 | MoE ~4B active, image/PDF/OCR input, `--quantization modelopt --moe-backend marlin`, fp8 KV (10 GiB, ~852k tokens), `--reasoning-parser gemma4`, `--tool-call-parser gemma4`; kept off tool-calling roles. Was PaddleOCR-VL (0 requests served) until 2026-10-05 |
 | `embed` | `nomic-ai/nomic-embed-text-v1.5` | 0.03 (~4 GB) | 8192 | `--runner pooling --trust-remote-code`, 768 d |
 
 Repo confidence (checked on Hugging Face 2026-09-29; none was run on a GB10):
@@ -159,11 +160,13 @@ Repo confidence (checked on Hugging Face 2026-09-29; none was run on a GB10):
 `+` instead of spaces (`--kv-cache-dtype+fp8+--max-num-seqs+4`; no JSON with `+`
 in it). An env var `GB10_EXTRA_<alias>` (space separated) appends more.
 `GB10_MAIN_FALLBACK` (`--main-fallback`) is a spec used if `main` fails.
+`GB10_ALIASES` (`--aliases`, default `worker=main`) adds LiteLLM-only aliases,
+space separated `alias=target`, served by an already-started model.
 **Alias contract:** clients only call `main`, `worker`, `vision`, `embed`. Swap
 a model by changing `--models` and recreating the instance; no client change.
 
 **Startup order.** The supervisor starts the servers **one at a time, largest
-share first** (main, worker, vision, embed), each on its own loopback port
+share first** (main, vision, embed), each on its own loopback port
 (8001..), and waits for that server's `/health` before starting the next. Each
 vLLM sizes its KV cache from the memory that is free when it starts, so
 parallel starts would race on the unified memory. A server that exits or
@@ -179,7 +182,7 @@ Known risks:
   memory 50.92 GiB, current free memory 80.31 GiB`: page cache from the
   weight downloads was freed while vLLM profiled, and the container can't drop
   caches (`/proc/sys/vm` is read-only). Every default spec therefore sets
-  `--kv-cache-memory-bytes` (main 18 GiB, worker 8, vision 3, embed 1), which
+  `--kv-cache-memory-bytes` (main 24 GiB, vision 10, embed 1), which
   skips the check. Keep it on any spec you add.
 - **vLLM on sm_121.** v0.30.0 lists GB10 work (SM12x FP8 swizzle, W4A4 NVFP4
   preferred on SM120/121, B12X attention) but I found no report of this exact

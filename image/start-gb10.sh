@@ -18,6 +18,8 @@
 #          GB10_EXTRA_<alias> (space separated, appended after 'extra').
 # GB10_MAIN_FALLBACK: same spec (alias= optional, means 'main'), used if main
 #   fails to become healthy.
+# GB10_ALIASES: space-separated  alias=target  LiteLLM-only aliases served by
+#   an already-started model (no extra vLLM). Default: worker=main.
 #
 # Every path/binary below can be overridden by env (used by the test harness).
 
@@ -51,7 +53,8 @@ VLLM_BASE_PORT="${GB10_VLLM_BASE_PORT:-8001}"
 HEALTH_TIMEOUT="${GB10_HEALTH_TIMEOUT:-2400}"   # first boot downloads weights
 SUPERVISE_INTERVAL="${GB10_SUPERVISE_INTERVAL:-30}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"
-GB10_MODELS="${GB10_MODELS:-main=unsloth/Qwen3.8-27B-NVFP4@0.38@65536@--kv-cache-dtype+fp8+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+4+--kv-cache-memory-bytes+19327352832 worker=NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4@0.25@32768@--kv-cache-dtype+fp8+--enable-auto-tool-choice+--tool-call-parser+hermes+--max-num-seqs+4+--kv-cache-memory-bytes+8589934592 vision=Qwen/Qwen3-VL-8B-Instruct-FP8@0.12@16384@--max-num-seqs+2+--kv-cache-memory-bytes+3221225472 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
+GB10_MODELS="${GB10_MODELS:-main=nvidia/Qwen3.6-35B-A3B-NVFP4@0.45@262144@--quantization+modelopt+--trust-remote-code+--kv-cache-dtype+fp8+--moe-backend+marlin+--max-num-batched-tokens+8192+--enable-prefix-caching+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+3+--speculative-config.moe_backend+triton+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+25769803776 vision=nvidia/Gemma-4-26B-A4B-NVFP4@0.30@262144@--quantization+modelopt+--kv-cache-dtype+fp8+--moe-backend+marlin+--enable-prefix-caching+--reasoning-parser+gemma4+--enable-auto-tool-choice+--tool-call-parser+gemma4+--max-num-seqs+4+--kv-cache-memory-bytes+10737418240 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
+GB10_ALIASES="${GB10_ALIASES-worker=main}"
 mkdir -p "$HF_HOME" "$(dirname "$TS_SOCK")"
 
 # ---------------------------------------------------------------- 1. tailscale
@@ -128,24 +131,42 @@ if [ "${#STARTED_ALIAS[@]}" -eq 0 ]; then log "no model started; exiting"; exit 
 # No master key: LiteLLM listens on loopback only and is reached solely through
 # tailscale serve, so access control is the tailnet ACL (tag:vastai-client ->
 # tag:vastai-gb10:8080). Do not expose it any other way.
+# litellm_entry name served_model port is_embedding -> one model_list entry
+litellm_entry() {
+  echo "  - model_name: $1"
+  echo "    litellm_params:"
+  echo "      model: openai/$2"
+  echo "      api_base: http://127.0.0.1:$3/v1"
+  echo "      api_key: none"
+  # worker gets short, direct answers (approval guardian, titles, compression).
+  # Its model runs with --reasoning-parser (Hermes sends thinking_token_budget),
+  # so with thinking on the answer can land in reasoning_content and content
+  # comes back null; the guardian then escalates every command to the user.
+  if [ "$1" = worker ]; then
+    echo "      extra_body:"
+    echo "        chat_template_kwargs:"
+    echo "          enable_thinking: false"
+  fi
+  [ "$4" = 1 ] && { echo "    model_info:"; echo "      mode: embedding"; }
+  return 0
+}
 CFG="$RUN/litellm.yaml"
 {
   echo "model_list:"
   for i in "${!STARTED_ALIAS[@]}"; do
-    echo "  - model_name: ${STARTED_ALIAS[$i]}"
-    echo "    litellm_params:"
-    echo "      model: openai/${STARTED_ALIAS[$i]}"
-    echo "      api_base: http://127.0.0.1:${STARTED_PORT[$i]}/v1"
-    echo "      api_key: none"
-    # worker is an Instruct (non-thinking) model but runs with --reasoning-parser
-    # (Hermes sends thinking_token_budget); without this the parser files the
-    # whole answer under reasoning_content and content comes back null.
-    if [ "${STARTED_ALIAS[$i]}" = worker ]; then
-      echo "      extra_body:"
-      echo "        chat_template_kwargs:"
-      echo "          enable_thinking: false"
-    fi
-    [ "${STARTED_EMB[$i]}" = 1 ] && { echo "    model_info:"; echo "      mode: embedding"; }
+    litellm_entry "${STARTED_ALIAS[$i]}" "${STARTED_ALIAS[$i]}" "${STARTED_PORT[$i]}" "${STARTED_EMB[$i]}"
+  done
+  for spec in $GB10_ALIASES; do
+    a="${spec%%=*}"; t="${spec#*=}"; found=""
+    for i in "${!STARTED_ALIAS[@]}"; do
+      [ "${STARTED_ALIAS[$i]}" = "$a" ] && { found=dup; break; }
+      [ "${STARTED_ALIAS[$i]}" = "$t" ] && found="$i"
+    done
+    case "$found" in
+      dup) log "alias $a is already a served model; skipping $spec" >&2 ;;
+      "")  log "alias $a: target $t not started; skipping" >&2 ;;
+      *)   litellm_entry "$a" "$t" "${STARTED_PORT[$found]}" "${STARTED_EMB[$found]}" ;;
+    esac
   done
   echo "litellm_settings:"
   echo "  drop_params: true"
