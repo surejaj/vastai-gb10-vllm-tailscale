@@ -62,9 +62,10 @@ if ! pgrep -x tailscaled >/dev/null; then
 fi
 if ! "$TAILSCALE" --socket="$TS_SOCK" status >/dev/null 2>&1; then
   [ -n "${TS_AUTHKEY:-}" ] || { log "TS_AUTHKEY is not set; cannot join tailnet"; exit 1; }
-  # No --shields-up: the proxy must be able to dial in.
+  # No --shields-up: the proxy must be able to dial in. --ssh: Tailscale SSH,
+  # gated by the tailnet ACL ssh rule (README section 5).
   "$TAILSCALE" --socket="$TS_SOCK" up --auth-key="$TS_AUTHKEY" \
-    --hostname="$TS_HOSTNAME" --advertise-tags="$TS_TAGS" \
+    --hostname="$TS_HOSTNAME" --advertise-tags="$TS_TAGS" --ssh \
     --accept-dns=false --accept-routes=false >/dev/null 2>&1 \
     || { log "tailscale up failed"; exit 1; }
 fi

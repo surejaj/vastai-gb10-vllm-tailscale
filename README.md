@@ -83,15 +83,22 @@ State: `/mnt/main/app-data/vastai-ts-proxy/tailscale` (bind, rw).
     "tag:vastai-gb10":   ["autogroup:admin"]
   },
   "acls": [
-    // the ONLY rule involving these tags
-    {"action": "accept", "src": ["tag:vastai-client"], "dst": ["tag:vastai-gb10:8080"]}
+    // the ONLY rules involving these tags
+    {"action": "accept", "src": ["tag:vastai-client"], "dst": ["tag:vastai-gb10:8080"]},
+    // Tailscale SSH into the GB10 (also needs the ssh rule below)
+    {"action": "accept", "src": ["autogroup:member"], "dst": ["tag:vastai-gb10:22"]}
     // tag:vastai-gb10 as src: no rule => no access into the tailnet
+  ],
+  "ssh": [
+    {"action": "check", "src": ["autogroup:member"], "dst": ["tag:vastai-gb10"], "users": ["root"]}
   ]
 }
 ```
 
-- Do not use `--shields-up` on the GB10 (it would block the proxy); the ACL is what restricts it.
-- Do not add `tag:vastai-gb10` to any `src`, grant, SSH rule or `autogroup:member` rule.
+- Do not use `--shields-up` on the GB10 (it would block the proxy and SSH); the ACL is what restricts it.
+- The GB10 runs `tailscale up --ssh`; `tailscale ssh root@gb10-vast` works once the
+  ssh rule is applied. `check` forces a browser re-auth periodically.
+- Never put `tag:vastai-gb10` in a `src` (ACL, grant or SSH rule): it must not reach into the tailnet.
 - GB10 auth key: **ephemeral, pre-tagged** `tag:vastai-gb10`, single-purpose,
   short expiry. The GB10 hostname must match `VAST_TS_HOST` (`gb10-vast`).
 - Leave `--shields-up` on the proxy: nothing may dial in.
@@ -332,7 +339,7 @@ TS_AUTHKEY=... ./provision-gb10.py create --offer-id N --yes   # rents (billable
   entrypoint). The supervisor is flock-guarded (a repeated onstart is a no-op)
   and logs to `/var/log/gb10.log` on the instance (per-model logs in
   `/run/gb10/`). It runs `tailscaled --tun=userspace-networking --state=mem:`,
-  `tailscale up --hostname=gb10-vast --advertise-tags=tag:vastai-gb10` (no
+  `tailscale up --hostname=gb10-vast --advertise-tags=tag:vastai-gb10 --ssh` (no
   `--shields-up`), then the vLLM servers, LiteLLM and the required
   `tailscale serve` (section 7). No public ports are requested.
 
