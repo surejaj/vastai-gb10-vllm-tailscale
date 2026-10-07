@@ -353,7 +353,10 @@ a different key from the proxy's own (`tag:vastai-client`, Infisical
 `/vastai-tailscale`). **Lifecycle is destroy/recreate only**: Tailscale state is
 RAM-only, so a stopped and restarted instance would re-use an already consumed
 key and could not rejoin. That is why `stop`/`start` do not exist. Every `create`
-needs a fresh key. If the old ephemeral node has not been reaped yet, the new
+needs a fresh key. vast.ai stopping the instance for lack of credit is such a
+restart (seen 2026-10-06: it came back off the tailnet with no model running,
+and vast's ssh refused the key); `vastai reboot` does not help. Recover with
+`destroy` then `create` with a fresh key. If the old ephemeral node has not been reaped yet, the new
 one may register as `gb10-vast-1` and the proxy will not find it: check that
 `tailscale status` shows exactly `gb10-vast`. `HF_TOKEN` (optional, read-only
 scope) is also visible to the host; it is not needed for the default public
