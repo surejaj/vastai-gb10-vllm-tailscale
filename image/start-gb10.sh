@@ -19,7 +19,7 @@
 # GB10_MAIN_FALLBACK: same spec (alias= optional, means 'main'), used if main
 #   fails to become healthy.
 # GB10_ALIASES: space-separated  alias=target  LiteLLM-only aliases served by
-#   an already-started model (no extra vLLM). Default: worker=main.
+#   an already-started model (no extra vLLM). Default: worker=main vision=main.
 #
 # Every path/binary below can be overridden by env (used by the test harness).
 
@@ -53,11 +53,11 @@ PORT="${GB10_PORT:-8080}"                  # tailnet port (tailscale serve)
 # sshN.vast.ai) for Jupyter, loopback bind or not.
 LITELLM_PORT="${GB10_LITELLM_PORT:-8090}"
 VLLM_BASE_PORT="${GB10_VLLM_BASE_PORT:-8001}"
-HEALTH_TIMEOUT="${GB10_HEALTH_TIMEOUT:-2400}"   # first boot downloads weights
+HEALTH_TIMEOUT="${GB10_HEALTH_TIMEOUT:-3600}"   # first boot downloads ~77 GB of weights
 SUPERVISE_INTERVAL="${GB10_SUPERVISE_INTERVAL:-30}"
 export HF_HOME="${HF_HOME:-/workspace/hf}"
-GB10_MODELS="${GB10_MODELS:-main=nvidia/Qwen3.6-35B-A3B-NVFP4@0.45@262144@--quantization+modelopt+--trust-remote-code+--kv-cache-dtype+fp8+--moe-backend+marlin+--max-num-batched-tokens+8192+--enable-prefix-caching+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+3+--speculative-config.moe_backend+triton+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+25769803776 vision=nvidia/Gemma-4-26B-A4B-NVFP4@0.30@262144@--quantization+modelopt+--kv-cache-dtype+fp8+--moe-backend+marlin+--enable-prefix-caching+--reasoning-parser+gemma4+--enable-auto-tool-choice+--tool-call-parser+gemma4+--max-num-seqs+4+--kv-cache-memory-bytes+10737418240 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
-GB10_ALIASES="${GB10_ALIASES-worker=main}"
+GB10_MODELS="${GB10_MODELS:-main=Intel/Qwen3.5-122B-A10B-int4-AutoRound@0.82@262144@--trust-remote-code+--max-num-batched-tokens+8192+--enable-prefix-caching+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+2+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+21474836480 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
+GB10_ALIASES="${GB10_ALIASES-worker=main vision=main}"
 mkdir -p "$HF_HOME" "$(dirname "$TS_SOCK")"
 
 # ---------------------------------------------------------------- 1. tailscale

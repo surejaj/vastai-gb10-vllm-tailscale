@@ -48,37 +48,48 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LABEL = "gb10-vast"
 DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # Space-separated alias=hf_repo@mem_frac@max_len[@extra]; extra = vLLM args
-# joined with '+'. Started one at a time, largest share first (~0.78 total).
-# Verified on a vast.ai GB10 on 2026-10-04. --kv-cache-memory-bytes is
-# required on the GB10: unified memory means page cache freed while vLLM
-# profiles makes its memory check fail; an explicit KV size skips the check.
-# worker needs --reasoning-parser: Hermes sends thinking_token_budget, which
-# vLLM rejects without one. main takes 8 seqs so subagent fan-out doesn't queue.
-# main is the Qwen3.6-35B-A3B MoE (~3B active) with MTP-3: ~97 tok/s single
-# stream vs ~19 for the dense Qwen3.8-27B it replaced (measured 2026-10-04).
-# GB10 has no native FP4 MoE path, hence --moe-backend marlin. The dotted
-# --speculative-config.* form avoids JSON quotes in the env spec. Both chat
-# models run their native 262144 context. vision is Gemma 4 26B-A4B (MoE,
-# ~4B active), chosen for document/OCR reading; it is kept off tool calling.
+# joined with '+'. Started one at a time, largest share first (~0.85 total).
+# --kv-cache-memory-bytes is required on the GB10: unified memory means page
+# cache freed while vLLM profiles makes its memory check fail; an explicit KV
+# size skips the check. main needs --reasoning-parser: Hermes sends
+# thinking_token_budget, which vLLM rejects without one. main takes 8 seqs so
+# subagent fan-out doesn't queue.
+# main is Qwen3.5-122B-A10B (MoE, ~10B active, natively multimodal) as Intel's
+# INT4 AutoRound build (~77 GB incl. BF16 MTP head and vision tower). vLLM maps
+# quant_method auto-round to INC/Marlin W4A16 on its own, so no --quantization.
+# Chosen over NVFP4: ~28 tok/s plain / ~36-38 MTP-1 / ~51 MTP-2 (patched) on a
+# single Spark vs ~16 for NVFP4, whose FP4 kernels are slow on SM121 (NVIDIA
+# forum, 2026). BF16 KV (no fp8): fp8 KV + prefix caching truncates Qwen3.5
+# output (vllm#47349). 20 GiB KV ~ 24 KiB/token on the 12 full-attention
+# layers, so roughly 2-3 full 262144 requests. Not yet run on the vast.ai GB10.
+# vision is a LiteLLM alias of main (Gemma 4 vision server dropped).
 DEFAULT_MODELS = (
+    "main=Intel/Qwen3.5-122B-A10B-int4-AutoRound@0.82@262144@"
+    "--trust-remote-code+--max-num-batched-tokens+8192+--enable-prefix-caching"
+    "+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+2"
+    "+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml"
+    "+--max-num-seqs+8+--kv-cache-memory-bytes+21474836480 "
+    "embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code"
+    "+--kv-cache-memory-bytes+1073741824"
+)
+# Rollback / --main-fallback: the previous main (Qwen3.6-35B-A3B NVFP4, MTP-3,
+# ~97 tok/s, verified on a vast.ai GB10 2026-10-04). Not a default fallback:
+# set it with --main-fallback. If it fires, vision resolves to it too
+# (Qwen3.6 is also multimodal).
+QWEN36_MAIN_SPEC = (
     "main=nvidia/Qwen3.6-35B-A3B-NVFP4@0.45@262144@"
     "--quantization+modelopt+--trust-remote-code+--kv-cache-dtype+fp8+--moe-backend+marlin"
     "+--max-num-batched-tokens+8192+--enable-prefix-caching"
     "+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+3"
     "+--speculative-config.moe_backend+triton"
     "+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml"
-    "+--max-num-seqs+8+--kv-cache-memory-bytes+25769803776 "
-    "vision=nvidia/Gemma-4-26B-A4B-NVFP4@0.30@262144@"
-    "--quantization+modelopt+--kv-cache-dtype+fp8+--moe-backend+marlin+--enable-prefix-caching"
-    "+--reasoning-parser+gemma4+--enable-auto-tool-choice+--tool-call-parser+gemma4"
-    "+--max-num-seqs+4+--kv-cache-memory-bytes+10737418240 "
-    "embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code"
-    "+--kv-cache-memory-bytes+1073741824"
+    "+--max-num-seqs+8+--kv-cache-memory-bytes+25769803776"
 )
-# worker is a LiteLLM alias of main (no second copy in memory); Qwen3.6
-# batches well, so subagents, the approval guardian and titles share it.
-DEFAULT_ALIASES = "worker=main"
-DEFAULT_DISK = 100
+# worker and vision are LiteLLM aliases of main (no second copy in memory);
+# worker gets enable_thinking false in the supervisor's LiteLLM config.
+DEFAULT_ALIASES = "worker=main vision=main"
+# 77 GB main + 15-20 GB image + ~22 GB if the Qwen3.6 fallback downloads.
+DEFAULT_DISK = 150
 DEFAULT_TS_TAG = "tag:vastai-gb10"
 SERVE_PORT = 8080
 HOURS_PER_MONTH = 730
@@ -475,7 +486,8 @@ def build_parser():
                    help="LiteLLM-only aliases served by a started model, space separated "
                         "'alias=target' (GB10_ALIASES). Default: %(default)s")
     c.add_argument("--main-fallback", default="",
-                   help="same spec, used if `main` fails to start (GB10_MAIN_FALLBACK)")
+                   help="same spec, used if `main` fails to start (GB10_MAIN_FALLBACK); "
+                        "the previous Qwen3.6 main is QWEN36_MAIN_SPEC in this file")
     c.add_argument("--ts-hostname", default=LABEL, help="tailnet hostname (default %(default)s)")
     c.add_argument("--ts-tag", default=DEFAULT_TS_TAG, help="advertised tag (default %(default)s)")
     c.add_argument("--max-price", type=float, default=None, help="refuse above this $/hr")
