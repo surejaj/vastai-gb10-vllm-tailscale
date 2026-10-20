@@ -1,6 +1,6 @@
 # `vastai-ts-proxy` — egress proxy to a vast.ai GB10 over Tailscale
 
-Status: **PLAN — not yet applied.** Nothing here exists on `wolverine` yet.
+Status: **live** since 2026-10-01 (proxy on `wolverine`, GB10 on vast.ai).
 Host Unraid `wolverine`, tailnet `rattlesnake-pauling.ts.net`, Docker via the
 `unraid-remote` context (no SSH).
 
@@ -125,12 +125,12 @@ the real budget is weights plus the explicit `--kv-cache-memory-bytes`.
 
 | alias | HF repo | mem share | max_len | notes |
 |---|---|---|---|---|
-| `main` | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | 0.82 (~99 GB) | 262144 | Qwen3.5-122B-A10B, MoE ~10B active, natively multimodal (image input). INT4 AutoRound (W4A16, ~77 GB on disk incl. BF16 MTP head and vision tower); vLLM auto-detects the quant (no `--quantization`). MTP-2 speculative decoding, BF16 KV (20 GiB, roughly 0.7-0.9M tokens, 2-3 full-context requests; estimate, check the `GPU KV cache size` log line), `--reasoning-parser qwen3`, tool calling `qwen3_xml`. Expected ~36-45 tok/s single stream (forum: 28 plain, 36.5 MTP-1, 51 MTP-2 with patches). Not yet run on the vast.ai GB10. Switched from Qwen3.6-35B-A3B (see rollback below) |
+| `main` | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | 0.82 (~99 GB) | 262144 | Qwen3.5-122B-A10B, MoE ~10B active, natively multimodal (image input). INT4 AutoRound (W4A16, ~77 GB on disk incl. BF16 MTP head and vision tower); vLLM auto-detects the quant (no `--quantization`). MTP-2 speculative decoding, BF16 KV (20 GiB = 729,028 tokens, 2.78 full-context requests per the vLLM log), `--reasoning-parser qwen3`, tool calling `qwen3_xml`. Measured ~34-35 tok/s single stream (400-token prose, thinking off, 2026-10-20; forum: 28 plain, 36.5 MTP-1, 51 MTP-2 with patches). Live on the vast.ai GB10 since 2026-10-13 (healthy 787 s after start). Switched from Qwen3.6-35B-A3B (see rollback below) |
 | `worker` | LiteLLM alias of `main` (`GB10_ALIASES`) | none | 262144 | same vLLM as `main`, with `chat_template_kwargs.enable_thinking: false` so short answers (approval guardian, titles, compression) land in `content`. Was `NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4` until 2026-10-05 |
 | `vision` | LiteLLM alias of `main` (`GB10_ALIASES`) | none | 262144 | same vLLM as `main` (thinking on); image/PDF/OCR input. Was `nvidia/Gemma-4-26B-A4B-NVFP4` (0.30 share, own vLLM) until the Qwen3.5-122B switch |
 | `embed` | `nomic-ai/nomic-embed-text-v1.5` | 0.03 (~4 GB) | 8192 | `--runner pooling --trust-remote-code`, 768 d |
 
-Repo confidence (checked on Hugging Face 2026-09-29; none was run on a GB10):
+Repo confidence (checked on Hugging Face 2026-09-29; the Qwen3.5 checkpoint has run on the GB10 since 2026-10-13):
 - `Intel/Qwen3.5-122B-A10B-int4-AutoRound` (https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound,
   checked 2026-10-13): 76.8 GB (14 shards + `model_extra_tensors.safetensors`
   with the MTP head), `quant_method: auto-round`, `auto_round:auto_gptq`

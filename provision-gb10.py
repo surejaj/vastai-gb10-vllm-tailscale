@@ -60,8 +60,8 @@ DEFAULT_IMAGE = "ghcr.io/surejaj/vastai-gb10-vllm-tailscale:latest"
 # Chosen over NVFP4: ~28 tok/s plain / ~36-38 MTP-1 / ~51 MTP-2 (patched) on a
 # single Spark vs ~16 for NVFP4, whose FP4 kernels are slow on SM121 (NVIDIA
 # forum, 2026). BF16 KV (no fp8): fp8 KV + prefix caching truncates Qwen3.5
-# output (vllm#47349). 20 GiB KV ~ 24 KiB/token on the 12 full-attention
-# layers, so roughly 2-3 full 262144 requests. Not yet run on the vast.ai GB10.
+# output (vllm#47349). 20 GiB KV = 729,028 tokens, 2.78 full 262144 requests.
+# Live on the vast.ai GB10 since 2026-10-13: ~34-35 tok/s single stream.
 # vision is a LiteLLM alias of main (Gemma 4 vision server dropped).
 DEFAULT_MODELS = (
     "main=Intel/Qwen3.5-122B-A10B-int4-AutoRound@0.82@262144@"
