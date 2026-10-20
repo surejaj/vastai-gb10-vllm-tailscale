@@ -2,7 +2,7 @@
 """Rent and manage the NVIDIA GB10 on vast.ai that sits behind vastai-ts-proxy.
 
 The instance runs the vastai-gb10-vllm-tailscale image (vLLM per model + LiteLLM on
-127.0.0.1:8080, exposed only through `tailscale serve`) and joins the tailnet
+127.0.0.1:8090, exposed only through `tailscale serve` on tailnet :8080) and joins the tailnet
 as `gb10-vast` (tag:vastai-gb10) with Tailscale in userspace-networking mode.
 The image source is in image/. See README.md.
 

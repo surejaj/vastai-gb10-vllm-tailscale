@@ -31,9 +31,10 @@ themselves. One small proxy container does, on a locked-down tag.
   in userspace mode (`TS_USERSPACE=true`, `--shields-up`). Egress and Infisical
   access come from `infisical-access`.
 - Clients use `http://vastai-ts-proxy:8080/v1`.
-- On the GB10, LiteLLM listens on **127.0.0.1:8080 only** and each vLLM on
+- On the GB10, LiteLLM listens on **127.0.0.1:8090 only** (not 8080: vast's ssh_proxy
+  publishes container :8080 at `sshN.vast.ai:<ssh_port+1>`) and each vLLM on
   127.0.0.1:8001.. (nothing on an external or tailnet interface).
-  `tailscale serve --bg --tcp=8080 tcp://127.0.0.1:8080` is the only way in from
+  `tailscale serve --bg --tcp=8080 tcp://127.0.0.1:8090` is the only way in from
   the tailnet, so the supervisor treats it as required and exits 1 if it fails.
   LiteLLM runs with **no master key**: access control is the tailnet ACL
   (section 5) plus the loopback bind. Clients call model **aliases** (section 7).
@@ -397,7 +398,7 @@ when `vastai-sdk` is missing or `status` fails; `--destroy-gb10` dies on failure
   is not always ready right after start
   (https://github.com/tailscale/tailscale/issues/2642). Everything is
   loopback-only, so the supervisor relies on the explicit
-  `tailscale serve --bg --tcp=8080 tcp://127.0.0.1:8080` (required). Check with
+  `tailscale serve --bg --tcp=8080 tcp://127.0.0.1:8090` (required). Check with
   `docker exec Hermes-Agent curl -sS http://vastai-ts-proxy:8080/v1/models`.
 - The HF repos, vLLM flags and embed length in section 7.
 

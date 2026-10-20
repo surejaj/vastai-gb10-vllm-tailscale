@@ -4,8 +4,8 @@
 #   1. tailscaled (userspace, RAM state) + tailscale up   -> node gb10-vast
 #   2. one vLLM per model in GB10_MODELS, ONE AT A TIME, largest memory share
 #      first, each on 127.0.0.1:8001.. and waited on until /health is OK
-#   3. LiteLLM on 127.0.0.1:8080 mapping alias -> its vLLM (started ones only)
-#   4. tailscale serve --tcp=8080 -> 127.0.0.1:8080 (REQUIRED)
+#   3. LiteLLM on 127.0.0.1:8090 mapping alias -> its vLLM (started ones only)
+#   4. tailscale serve --tcp=8080 -> 127.0.0.1:8090 (REQUIRED)
 #   5. supervise: log if a vLLM or LiteLLM process dies (no restart)
 #
 # Idempotent: flock-guarded, so a second run while the first is alive exits 0.
@@ -48,7 +48,10 @@ TAILSCALED="${TAILSCALED:-tailscaled}"
 TAILSCALE="${TAILSCALE:-tailscale}"
 VLLM_BIN="${VLLM_BIN:-vllm}"
 LITELLM_BIN="${LITELLM_BIN:-/opt/litellm/bin/litellm}"
-PORT="${GB10_PORT:-8080}"                  # LiteLLM, exposed via tailscale serve
+PORT="${GB10_PORT:-8080}"                  # tailnet port (tailscale serve)
+# Not 8080: vast's ssh_proxy forwards container :8080 publicly (ssh_port+1 on
+# sshN.vast.ai) for Jupyter, loopback bind or not.
+LITELLM_PORT="${GB10_LITELLM_PORT:-8090}"
 VLLM_BASE_PORT="${GB10_VLLM_BASE_PORT:-8001}"
 HEALTH_TIMEOUT="${GB10_HEALTH_TIMEOUT:-2400}"   # first boot downloads weights
 SUPERVISE_INTERVAL="${GB10_SUPERVISE_INTERVAL:-30}"
@@ -130,7 +133,8 @@ if [ "${#STARTED_ALIAS[@]}" -eq 0 ]; then log "no model started; exiting"; exit 
 # ---------------------------------------------------------------- 3. LiteLLM
 # No master key: LiteLLM listens on loopback only and is reached solely through
 # tailscale serve, so access control is the tailnet ACL (tag:vastai-client ->
-# tag:vastai-gb10:8080). Do not expose it any other way.
+# tag:vastai-gb10:8080). Do not expose it any other way, and keep it off
+# container :8080 (see LITELLM_PORT).
 # litellm_entry name served_model port is_embedding -> one model_list entry
 litellm_entry() {
   echo "  - model_name: $1"
@@ -172,22 +176,22 @@ CFG="$RUN/litellm.yaml"
   echo "  drop_params: true"
 } >"$CFG"
 log "litellm config written: $CFG (aliases: ${STARTED_ALIAS[*]})"
-env -u HF_TOKEN nohup "$LITELLM_BIN" --config "$CFG" --host 127.0.0.1 --port "$PORT" \
+env -u HF_TOKEN nohup "$LITELLM_BIN" --config "$CFG" --host 127.0.0.1 --port "$LITELLM_PORT" \
   >"$RUN/litellm.log" 2>&1 9>&- &
 LITELLM_PID=$!
 for _ in $(seq 1 "${GB10_LITELLM_WAIT:-60}"); do
-  curl -fsS "http://127.0.0.1:$PORT/health/liveliness" >/dev/null 2>&1 && break
+  curl -fsS "http://127.0.0.1:$LITELLM_PORT/health/liveliness" >/dev/null 2>&1 && break
   sleep "${GB10_HEALTH_POLL:-2}"
 done
-curl -fsS "http://127.0.0.1:$PORT/health/liveliness" >/dev/null 2>&1 \
+curl -fsS "http://127.0.0.1:$LITELLM_PORT/health/liveliness" >/dev/null 2>&1 \
   || { log "litellm did not come up; see $RUN/litellm.log"; tail -n 20 "$RUN/litellm.log" | sed 's/^/    | /'; exit 1; }
-log "litellm up on 127.0.0.1:$PORT"
+log "litellm up on 127.0.0.1:$LITELLM_PORT"
 
 # ---------------------------------------------------------------- 4. serve
 # LiteLLM is loopback-only, so this is the only way in from the tailnet.
-"$TAILSCALE" --socket="$TS_SOCK" serve --bg --tcp="$PORT" "tcp://127.0.0.1:$PORT" \
+"$TAILSCALE" --socket="$TS_SOCK" serve --bg --tcp="$PORT" "tcp://127.0.0.1:$LITELLM_PORT" \
   || { log "tailscale serve failed; the GB10 would be unreachable"; exit 1; }
-log "tailscale serve: tailnet :$PORT -> 127.0.0.1:$PORT"
+log "tailscale serve: tailnet :$PORT -> 127.0.0.1:$LITELLM_PORT"
 
 # ---------------------------------------------------------------- 5. supervise
 # Logging only; a dead process stays dead (recreate the instance to recover).
