@@ -125,7 +125,7 @@ the real budget is weights plus the explicit `--kv-cache-memory-bytes`.
 
 | alias | HF repo | mem share | max_len | notes |
 |---|---|---|---|---|
-| `main` | `Intel/Qwen3.5-122B-A10B-int4-AutoRound` | 0.82 (~99 GB) | 262144 | Qwen3.5-122B-A10B, MoE ~10B active, natively multimodal (image input). INT4 AutoRound (W4A16, ~77 GB on disk incl. BF16 MTP head and vision tower); vLLM auto-detects the quant (no `--quantization`). MTP-2 speculative decoding, BF16 KV (20 GiB = 729,028 tokens, 2.78 full-context requests per the vLLM log), `--reasoning-parser qwen3`, tool calling `qwen3_xml`. Measured ~34-35 tok/s single stream (400-token prose, thinking off, 2026-10-20; forum: 28 plain, 36.5 MTP-1, 51 MTP-2 with patches). Live on the vast.ai GB10 since 2026-10-13 (healthy 787 s after start). Switched from Qwen3.6-35B-A3B (see rollback below) |
+| `main` | `nvidia/Qwen3.8-27B-NVFP4` | 0.70 | 262144 | Qwen3.8-27B dense, natively multimodal (image input). ModelOpt NVFP4 + FP8 mix (21.9 GB on disk); no `--quantization`. vLLM 0.32.0, `FlashInferCutlassNvFp4LinearKernel`. MTP-3, fp8_e4m3 KV (30 GiB = 846,476 tokens), `--no-async-scheduling` (vllm #53912), `--reasoning-parser qwen3`, tool calling `qwen3_coder`, images capped at 4 per prompt. LiteLLM adds `top_k: 20` to every chat alias (vllm #58231: thinking budget + MTP + top-p without top-k emits token 0 on 0.32.0). Measured 23-29 tok/s single stream (2026-10-31). First boot ~16 min (FlashInfer autotune; no flashinfer-cubin, too big for the disk, only flashinfer-jit-cache + sm121a). Live since 2026-10-31. Switched from Qwen3.5-122B (see rollback below) |
 | `worker` | LiteLLM alias of `main` (`GB10_ALIASES`) | none | 262144 | same vLLM as `main`, with `chat_template_kwargs.enable_thinking: false` so short answers (approval guardian, titles, compression) land in `content`. Was `NVFP4/Qwen3-30B-A3B-Instruct-2507-FP4` until 2026-10-05 |
 | `vision` | LiteLLM alias of `main` (`GB10_ALIASES`) | none | 262144 | same vLLM as `main` (thinking on); image/PDF/OCR input. Was `nvidia/Gemma-4-26B-A4B-NVFP4` (0.30 share, own vLLM) until the Qwen3.5-122B switch |
 | `embed` | `nomic-ai/nomic-embed-text-v1.5` | 0.03 (~4 GB) | 8192 | `--runner pooling --trust-remote-code`, 768 d |
@@ -143,6 +143,12 @@ Repo confidence (checked on Hugging Face 2026-09-29; the Qwen3.5 checkpoint has 
   The 51 tok/s figure needs out-of-tree patches (INT8 LM head); we run stock.
   Tuning knob if decode is slow: `GB10_EXTRA_main="--attention-backend FLASHINFER"`
   (used in the forum runs, untested here).
+
+**Rollback to Qwen3.5-122B** (live 2026-10-13 to 2026-10-31, ~34-35 tok/s; weights still in `/workspace/hf`):
+
+```
+main=Intel/Qwen3.5-122B-A10B-int4-AutoRound@0.82@262144@--trust-remote-code+--max-num-batched-tokens+8192+--enable-prefix-caching+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+2+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_coder+--max-num-seqs+8+--kv-cache-memory-bytes+21474836480
+```
 
 **Rollback / `--main-fallback`.** The previous `main` (verified on the vast.ai
 GB10 2026-10-04, ~89-97 tok/s; also `QWEN36_MAIN_SPEC` in `provision-gb10.py`):

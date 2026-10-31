@@ -84,7 +84,9 @@ RESTART_MAX="${GB10_RESTART_MAX:-5}"            # restarts per process per windo
 RESTART_WINDOW="${GB10_RESTART_WINDOW:-3600}"   # seconds
 STOP_GRACE="${GB10_STOP_GRACE:-60}"             # SIGTERM -> SIGKILL, seconds
 export HF_HOME="${HF_HOME:-/workspace/hf}"
-GB10_MODELS="${GB10_MODELS:-main=Intel/Qwen3.5-122B-A10B-int4-AutoRound@0.82@262144@--trust-remote-code+--max-num-batched-tokens+8192+--enable-prefix-caching+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+2+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_xml+--max-num-seqs+8+--kv-cache-memory-bytes+21474836480 embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824}"
+# Default kept in single quotes: the JSON's '}' would end a ${..:-..} early.
+DEFAULT_MODELS='main=nvidia/Qwen3.8-27B-NVFP4@0.70@262144@--trust-remote-code+--max-num-batched-tokens+8192+--enable-prefix-caching+--kv-cache-dtype+fp8_e4m3+--speculative-config.method+mtp+--speculative-config.num_speculative_tokens+3+--reasoning-parser+qwen3+--enable-auto-tool-choice+--tool-call-parser+qwen3_coder+--max-num-seqs+8+--kv-cache-memory-bytes+32212254720+--no-async-scheduling+--limit-mm-per-prompt+{"image":4,"video":0} embed=nomic-ai/nomic-embed-text-v1.5@0.03@8192@--runner+pooling+--trust-remote-code+--kv-cache-memory-bytes+1073741824'
+GB10_MODELS="${GB10_MODELS:-$DEFAULT_MODELS}"
 GB10_ALIASES="${GB10_ALIASES-worker=main vision=main}"
 mkdir -p "$HF_HOME" "$(dirname "$TS_SOCK")"
 
@@ -259,10 +261,16 @@ litellm_entry() {
   # Its model runs with --reasoning-parser (Hermes sends thinking_token_budget),
   # so with thinking on the answer can land in reasoning_content and content
   # comes back null; the guardian then escalates every command to the user.
-  if [ "$1" = worker ]; then
+  # top_k on every chat model: vLLM 0.32.0 emits token 0 once
+  # thinking_token_budget runs out under MTP on rows with top-p but no top-k
+  # (vllm #58231, fixed after 0.32.0); rows with top-k take an unaffected path.
+  if [ "$4" != 1 ]; then
     echo "      extra_body:"
-    echo "        chat_template_kwargs:"
-    echo "          enable_thinking: false"
+    echo "        top_k: 20"
+    if [ "$1" = worker ]; then
+      echo "        chat_template_kwargs:"
+      echo "          enable_thinking: false"
+    fi
   fi
   [ "$4" = 1 ] && { echo "    model_info:"; echo "      mode: embedding"; }
   return 0
