@@ -470,6 +470,7 @@ when `vastai-sdk` is missing or `status` fails; `--destroy-gb10` dies on failure
 `image/` is the build context for `.github/workflows/build-image.yml`, which
 builds `ghcr.io/surejaj/vastai-gb10-vllm-tailscale` (arm64) on a native
 runner. See `image/README.md` for making the package public
-and pinning the digest. Base: `vllm/vllm-openai:v0.30.0-aarch64` (CUDA 13.0,
-release notes list GB10/SM121 work), plus Tailscale 1.102.4 and
+and pinning the digest. Base: `vllm/vllm-openai:v0.32.0-aarch64` (CUDA 13.0,
+torch 2.13.0, FlashInfer 0.7.0.post1 with flashinfer-cubin and
+flashinfer-jit-cache +cu130 incl. sm121a already baked in), plus Tailscale 1.102.4 and
 `litellm[proxy]==1.103.1` in its own venv.

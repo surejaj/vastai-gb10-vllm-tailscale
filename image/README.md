@@ -7,7 +7,7 @@ repo (`surejaj/vastai-gb10-vllm-tailscale`) with `image/` as the build context.
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | arm64 only. Base `vllm/vllm-openai:v0.30.0-aarch64` pinned by digest, plus static Tailscale 1.102.4, `litellm[proxy]==1.103.1` (own venv), curl, jq, flock |
+| `Dockerfile` | arm64 only. Base `vllm/vllm-openai:v0.32.0-aarch64` pinned by digest (CUDA 13.0; ships FlashInfer 0.7.0.post1 python + cubin + jit-cache +cu130, checked at build time), plus static Tailscale 1.102.4, `litellm[proxy]==1.103.1` (own venv), curl, jq, flock |
 | `start-gb10.sh` | supervisor at `/opt/gb10/start-gb10.sh`: tailscale, vLLM one at a time, LiteLLM, `tailscale serve`, then restarts a dead vLLM/LiteLLM (limited; see the top-level README, section 7) |
 | `../.github/workflows/build-image.yml` | builds and pushes to GHCR on a native arm64 runner |
 
@@ -45,8 +45,8 @@ real GB10.
 ## Before the first build
 
 - Confirm the base digest: `docker buildx imagetools inspect
-  vllm/vllm-openai:v0.30.0-aarch64` should match the `@sha256:` in the
-  Dockerfile (taken from the Docker Hub API on 2026-09-29).
+  vllm/vllm-openai:v0.32.0-aarch64` should match the `@sha256:` in the
+  Dockerfile (taken from the Docker Hub API on 2026-10-30).
 - Why this base: see the comment block at the top of the Dockerfile.
 
 ## Optional: build locally (Apple Silicon)
