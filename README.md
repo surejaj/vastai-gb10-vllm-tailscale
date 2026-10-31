@@ -201,6 +201,31 @@ come up. If `main` fails and `GB10_MAIN_FALLBACK` is set, that spec is tried in
 its place. LiteLLM is then started with only the healthy aliases, and
 `tailscale serve` (required) publishes it.
 
+**Restarts.** After startup the supervisor checks every
+`GB10_SUPERVISE_INTERVAL` (30 s) whether each vLLM and LiteLLM is still alive.
+A dead one is logged (`DIED: ...`) and relaunched with the same command, env
+and port, its log appended to (`/run/gb10/vllm-<alias>.log`, `litellm.log`;
+each launch starts with a `launch <alias>` line), then waited on like the
+first start. Before a relaunch the old process group (vLLM's EngineCore
+children included) is stopped (SIGTERM, SIGKILL after `GB10_STOP_GRACE`, 60 s)
+and its port must be free, so two copies never share the unified memory.
+Restarts run one at a time; the loop blocks while a vLLM reloads. Each process
+gets `GB10_RESTART_MAX` (5) restarts per `GB10_RESTART_WINDOW` (3600 s), each
+logged as `RESTART: ... attempt N/5`. Past that it is logged once as
+`GIVING UP: <alias>` and left down; recover by recreating the instance. Only a
+process that exits counts as dead; a hung but running server is not restarted.
+
+**Hand re-runs.** The flock only stops a second copy while the supervisor is
+alive. If it died and left vLLM/LiteLLM running, a re-run refuses: when any
+target port (8001.. per model, plus 8090) already has a listener it logs
+`REFUSING to start: port(s) already in use: ...` and exits 1 without starting
+anything. Stop the old servers first. When run without the instance env (a
+hand run over ssh, `TS_AUTHKEY` unset), it reads `TS_AUTHKEY`, `HF_TOKEN`,
+`TS_HOSTNAME`, `TS_TAGS`, `HF_HOME`, `GB10_MODELS`, `GB10_ALIASES` and
+`GB10_MAIN_FALLBACK` from `/etc/environment` by parsing those lines; the file
+is never sourced, because its unquoted values (`TORCH_CUDA_ARCH_LIST`,
+`NVIDIA_REQUIRE_CUDA`) would run as commands.
+
 Known risks:
 - **vLLM memory profiling on unified memory (hit on 2026-10-01).** Without an
   explicit KV size, `main` died with `Error in memory profiling. Initial free
@@ -376,7 +401,8 @@ TS_AUTHKEY=... ./provision-gb10.py create --offer-id N --yes   # rents (billable
   `/run/gb10/`). It runs `tailscaled --tun=userspace-networking --state=mem:`,
   `tailscale up --hostname=gb10-vast --advertise-tags=tag:vastai-gb10 --ssh` (no
   `--shields-up`), then the vLLM servers, LiteLLM and the required
-  `tailscale serve` (section 7). No public ports are requested.
+  `tailscale serve` (section 7), and restarts a vLLM or LiteLLM that dies, up to
+  5 times per hour each (section 7, "Restarts"). No public ports are requested.
 
 **TS_AUTHKEY handling.** The key is handed to a third-party host as an instance
 env var. Create it in the Tailscale admin console as **single-use, ephemeral,

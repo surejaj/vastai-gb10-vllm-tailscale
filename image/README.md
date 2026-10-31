@@ -8,7 +8,7 @@ repo (`surejaj/vastai-gb10-vllm-tailscale`) with `image/` as the build context.
 | File | Purpose |
 |---|---|
 | `Dockerfile` | arm64 only. Base `vllm/vllm-openai:v0.30.0-aarch64` pinned by digest, plus static Tailscale 1.102.4, `litellm[proxy]==1.103.1` (own venv), curl, jq, flock |
-| `start-gb10.sh` | supervisor at `/opt/gb10/start-gb10.sh`: tailscale, vLLM one at a time, LiteLLM, `tailscale serve` |
+| `start-gb10.sh` | supervisor at `/opt/gb10/start-gb10.sh`: tailscale, vLLM one at a time, LiteLLM, `tailscale serve`, then restarts a dead vLLM/LiteLLM (limited; see the top-level README, section 7) |
 | `../.github/workflows/build-image.yml` | builds and pushes to GHCR on a native arm64 runner |
 
 No secrets are baked in. `TS_AUTHKEY` and `HF_TOKEN` are passed as env vars at
